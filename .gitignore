@@ -1,0 +1,23 @@
+# Node Modules
+node_modules/
+
+# Frontend build
+client/dist/
+client/.vite/
+
+# Backend uploads and database (DO NOT TRACK)
+server/uploads/
+server/database.sqlite
+server/*.sqlite
+*.sqlite
+
+# Logs
+*.log
+logs/
+
+# Env files
+.env
+
+# System files
+.DS_Store
+Thumbs.db
