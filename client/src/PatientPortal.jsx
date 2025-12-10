@@ -1,18 +1,40 @@
 import React, { useState, useEffect } from 'react';
 import { Upload, FileText, Download, Trash2, AlertCircle, CheckCircle, Loader } from 'lucide-react';
 
+// Base URL for API endpoints - points to the Node.js backend server
 const API_BASE_URL = 'http://localhost:3001/api';
 
+/**
+ * PatientPortal Component
+ * 
+ * A React component that provides a user interface for patients to:
+ * - Upload medical documents (PDF files only)
+ * - View a list of their uploaded documents
+ * - Download previously uploaded documents
+ * - Delete documents they no longer need
+ * 
+ * Features:
+ * - File validation (PDF only, 10MB max)
+ * - Real-time feedback with success/error messages
+ * - Loading states for better UX
+ * - Responsive design with Tailwind CSS
+ */
 export default function PatientPortal() {
-  const [documents, setDocuments] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState(null);
-  const [uploading, setUploading] = useState(false);
+  // State management
+  const [documents, setDocuments] = useState([]); // Array of document objects from the database
+  const [loading, setLoading] = useState(false); // Loading state for fetching documents
+  const [message, setMessage] = useState(null); // Current message to display (success/error)
+  const [uploading, setUploading] = useState(false); // Loading state for file uploads
 
+  // Fetch documents on component mount
   useEffect(() => {
     fetchDocuments();
   }, []);
 
+  /**
+   * Fetches all documents from the server
+   * Retrieves the list of uploaded documents and updates the state
+   */
   const fetchDocuments = async () => {
     try {
       setLoading(true);
@@ -27,22 +49,31 @@ export default function PatientPortal() {
     }
   };
 
+  /**
+   * Handles file upload process
+   * Validates the file (type and size) before uploading to the server
+   * 
+   * @param {Event} e - File input change event
+   */
   const handleUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
+    // Validate file type - only PDFs allowed
     if (file.type !== 'application/pdf') {
       showMessage('Please upload only PDF files', 'error');
-      e.target.value = '';
+      e.target.value = ''; // Reset input
       return;
     }
 
+    // Validate file size - maximum 10MB
     if (file.size > 10 * 1024 * 1024) {
       showMessage('File size must be less than 10MB', 'error');
-      e.target.value = '';
+      e.target.value = ''; // Reset input
       return;
     }
 
+    // Prepare form data for multipart upload
     const formData = new FormData();
     formData.append('document', file);
 
@@ -60,8 +91,8 @@ export default function PatientPortal() {
 
       const data = await response.json();
       showMessage('Document uploaded successfully!', 'success');
-      fetchDocuments();
-      e.target.value = '';
+      fetchDocuments(); // Refresh the document list
+      e.target.value = ''; // Reset input for next upload
     } catch (error) {
       showMessage('Upload failed: ' + error.message, 'error');
     } finally {
@@ -69,11 +100,19 @@ export default function PatientPortal() {
     }
   };
 
+  /**
+   * Handles document download
+   * Fetches the file from the server and triggers a browser download
+   * 
+   * @param {number} id - Document ID in the database
+   * @param {string} filename - Original filename for the download
+   */
   const handleDownload = async (id, filename) => {
     try {
       const response = await fetch(`${API_BASE_URL}/documents/${id}`);
       if (!response.ok) throw new Error('Download failed');
       
+      // Convert response to blob and create download link
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -81,6 +120,8 @@ export default function PatientPortal() {
       a.download = filename;
       document.body.appendChild(a);
       a.click();
+      
+      // Cleanup
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
       
@@ -90,7 +131,14 @@ export default function PatientPortal() {
     }
   };
 
+  /**
+   * Handles document deletion
+   * Prompts user for confirmation before deleting
+   * 
+   * @param {number} id - Document ID to delete
+   */
   const handleDelete = async (id) => {
+    // Confirm deletion with user
     if (!window.confirm('Are you sure you want to delete this document?')) {
       return;
     }
@@ -103,23 +151,42 @@ export default function PatientPortal() {
       if (!response.ok) throw new Error('Delete failed');
 
       showMessage('Document deleted successfully!', 'success');
-      fetchDocuments();
+      fetchDocuments(); // Refresh the document list
     } catch (error) {
       showMessage('Delete failed: ' + error.message, 'error');
     }
   };
 
+  /**
+   * Displays a temporary message to the user
+   * Message automatically disappears after 5 seconds
+   * 
+   * @param {string} text - Message content
+   * @param {string} type - Message type ('success' or 'error')
+   */
   const showMessage = (text, type) => {
     setMessage({ text, type });
     setTimeout(() => setMessage(null), 5000);
   };
 
+  /**
+   * Formats file size from bytes to human-readable format
+   * 
+   * @param {number} bytes - File size in bytes
+   * @returns {string} Formatted file size (e.g., "1.5 MB")
+   */
   const formatFileSize = (bytes) => {
     if (bytes < 1024) return bytes + ' B';
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB';
     return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
   };
 
+  /**
+   * Formats ISO date string to localized date/time
+   * 
+   * @param {string} dateString - ISO date string from database
+   * @returns {string} Formatted date/time string
+   */
   const formatDate = (dateString) => {
     return new Date(dateString).toLocaleString();
   };
@@ -127,7 +194,7 @@ export default function PatientPortal() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
       <div className="max-w-5xl mx-auto p-6">
-        {/* Header */}
+        {/* Header Section */}
         <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
           <div className="flex items-center gap-3 mb-2">
             <FileText className="w-8 h-8 text-indigo-600" />
@@ -136,7 +203,7 @@ export default function PatientPortal() {
           <p className="text-gray-600">Upload and manage your medical documents securely</p>
         </div>
 
-        {/* Message Alert */}
+        {/* Message Alert - Shows success or error messages */}
         {message && (
           <div className={`rounded-lg p-4 mb-6 flex items-center gap-3 ${
             message.type === 'success' 
@@ -154,10 +221,11 @@ export default function PatientPortal() {
           </div>
         )}
 
-        {/* Upload Section */}
+        {/* Upload Section - Drag and drop style file upload area */}
         <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
           <h2 className="text-xl font-semibold text-gray-800 mb-4">Upload Document</h2>
           <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-indigo-500 transition-colors">
+            {/* Hidden file input - triggered by label click */}
             <input
               type="file"
               accept="application/pdf"
@@ -170,6 +238,7 @@ export default function PatientPortal() {
               htmlFor="file-upload"
               className="cursor-pointer flex flex-col items-center"
             >
+              {/* Show spinner during upload, upload icon otherwise */}
               {uploading ? (
                 <Loader className="w-12 h-12 text-indigo-600 animate-spin mb-3" />
               ) : (
@@ -185,22 +254,25 @@ export default function PatientPortal() {
           </div>
         </div>
 
-        {/* Documents List */}
+        {/* Documents List Section - Displays all uploaded documents */}
         <div className="bg-white rounded-lg shadow-lg p-6">
           <h2 className="text-xl font-semibold text-gray-800 mb-4">
             My Documents ({documents.length})
           </h2>
 
+          {/* Loading State */}
           {loading ? (
             <div className="flex justify-center items-center py-12">
               <Loader className="w-8 h-8 text-indigo-600 animate-spin" />
             </div>
           ) : documents.length === 0 ? (
+            /* Empty State - No documents uploaded */
             <div className="text-center py-12">
               <FileText className="w-16 h-16 text-gray-300 mx-auto mb-3" />
               <p className="text-gray-500">No documents uploaded yet</p>
             </div>
           ) : (
+            /* Document List - Map through documents and display each */
             <div className="space-y-3">
               {documents.map((doc) => (
                 <div
@@ -208,6 +280,7 @@ export default function PatientPortal() {
                   className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow"
                 >
                   <div className="flex items-center justify-between">
+                    {/* Document Info */}
                     <div className="flex items-center gap-3 flex-1 min-w-0">
                       <FileText className="w-8 h-8 text-indigo-600 flex-shrink-0" />
                       <div className="min-w-0 flex-1">
@@ -220,6 +293,7 @@ export default function PatientPortal() {
                         </div>
                       </div>
                     </div>
+                    {/* Action Buttons - Download and Delete */}
                     <div className="flex gap-2 ml-4">
                       <button
                         onClick={() => handleDownload(doc.id, doc.filename)}
