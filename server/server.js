@@ -1,4 +1,7 @@
 // server.js
+// Express server for handling patient document uploads, downloads, and management
+// Uses SQLite for database, Multer for file uploads, and includes security validations
+
 const express = require('express');
 const multer = require('multer');
 const cors = require('cors');
@@ -10,19 +13,33 @@ const sanitize = require('sanitize-filename');
 const app = express();
 const PORT = 3001;
 
-const MAX_NAME_LEN = 200;
-const uploadsDir = path.join(__dirname, 'uploads');
+// Configuration constants
+const MAX_NAME_LEN = 200; // Maximum length for sanitized filenames
+const uploadsDir = path.join(__dirname, 'uploads'); // Directory for storing uploaded files
 
-// Middleware
-app.use(cors());
-app.use(express.json());
+// ===========================
+// Middleware Configuration
+// ===========================
+
+app.use(cors()); // Enable Cross-Origin Resource Sharing for frontend communication
+app.use(express.json()); // Parse JSON request bodies
+
+// ===========================
+// File System Setup
+// ===========================
 
 // Create uploads directory if it doesn't exist
+// This ensures the server can store files even on first run
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-// Initialize SQLite database
+// ===========================
+// Database Initialization
+// ===========================
+
+// Initialize SQLite database connection
+// Creates a file-based database (database.sqlite) if it doesn't exist
 const db = new sqlite3.Database('./database.sqlite', (err) => {
   if (err) {
     console.error('Error opening database:', err);
@@ -32,7 +49,17 @@ const db = new sqlite3.Database('./database.sqlite', (err) => {
   }
 });
 
-// Create documents table (includes original_filename for new DBs)
+/**
+ * Creates the documents table if it doesn't exist
+ * 
+ * Table schema:
+ * - id: Auto-incrementing primary key
+ * - filename: Sanitized filename stored on disk (unique with timestamp prefix)
+ * - original_filename: User's original filename (for display/download)
+ * - filepath: Full path to file on server
+ * - filesize: File size in bytes
+ * - created_at: Timestamp of upload
+ */
 function initializeDatabase() {
   db.run(
     `
@@ -55,10 +82,18 @@ function initializeDatabase() {
   );
 }
 
+// ===========================
+// Security Validation Functions
+// ===========================
+
 /**
- * Quick magic-byte check to validate a real PDF.
- * Reads first 4 bytes and checks for "%PDF".
- * Returns true if matches, false otherwise.
+ * Validates that a file is actually a PDF by checking magic bytes
+ * 
+ * PDFs start with "%PDF" in their first 4 bytes. This prevents users from
+ * uploading malicious files renamed with .pdf extension.
+ * 
+ * @param {string} filePath - Path to the file to validate
+ * @returns {boolean} True if file starts with PDF magic bytes, false otherwise
  */
 function isRealPDF(filePath) {
   try {
@@ -73,7 +108,14 @@ function isRealPDF(filePath) {
   }
 }
 
-// Configure multer for file upload with sanitized filenames
+// ===========================
+// Multer Configuration
+// ===========================
+
+/**
+ * Configure Multer storage engine
+ * Handles filename sanitization and storage location
+ */
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, uploadsDir);
@@ -81,37 +123,49 @@ const storage = multer.diskStorage({
   filename: (req, file, cb) => {
     let original = file.originalname || 'file';
 
-    // Normalize Unicode (NFC if supported), remove control chars, and trim
+    // Step 1: Normalize Unicode characters (e.g., accented characters)
+    // Ensures consistent representation of characters across systems
     original = original.normalize ? original.normalize('NFC') : original;
+    
+    // Step 2: Remove control characters (invisible/non-printable characters)
+    // Prevents issues with special characters that could cause problems
     original = original.replace(/[\x00-\x1F\x7F]/g, '').trim();
 
-    // Sanitize and collapse whitespace, limit length
+    // Step 3: Sanitize filename to remove dangerous characters
+    // Collapses multiple spaces and limits length
     let safeOriginal = sanitize(original).replace(/\s+/g, ' ').trim().slice(0, MAX_NAME_LEN);
 
-    // Fallback name when sanitize strips everything
+    // Step 4: Provide fallback if sanitization removes everything
     if (!safeOriginal) safeOriginal = 'file.pdf';
 
-    // Ensure extension ends with .pdf for stored filename readability
+    // Step 5: Ensure .pdf extension for consistency
     if (!/\.pdf$/i.test(safeOriginal)) safeOriginal = safeOriginal + '.pdf';
 
-    // Remove any leading dots/spaces to avoid hidden file issues
+    // Step 6: Remove leading dots/spaces to avoid hidden file issues
     safeOriginal = safeOriginal.replace(/^[.\s]+/, '');
 
-    // Create unique prefix and final stored filename
+    // Step 7: Create unique filename with timestamp and random hex
+    // Prevents filename collisions and provides chronological sorting
     const uniquePrefix = `${Date.now()}-${Math.floor(Math.random() * 1e9).toString(16)}`;
     const storedName = `${uniquePrefix}-${safeOriginal}`;
 
-    // Attach the original (normalized, un-sanitized) name to the request for DB insert
+    // Step 8: Save original filename to request object for database storage
+    // This allows us to show users their original filename while storing a safe one
     req.savedOriginalFilename = original;
 
     cb(null, storedName);
   },
 });
 
+/**
+ * Configure Multer upload middleware
+ * Includes file filtering and size limits
+ */
 const upload = multer({
   storage: storage,
   fileFilter: (req, file, cb) => {
-    // Quick check: allow only PDFs by mimetype (browser-provided). Real check later.
+    // Initial check: Only allow PDFs based on browser-provided MIME type
+    // This is a quick first-pass filter; real validation happens with magic bytes
     if (file.mimetype === 'application/pdf') {
       cb(null, true);
     } else {
@@ -119,13 +173,27 @@ const upload = multer({
     }
   },
   limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB limit
+    fileSize: 10 * 1024 * 1024, // 10MB maximum file size
   },
 });
 
+// ===========================
 // API Routes
+// ===========================
 
-// 1. Upload a PDF document
+/**
+ * POST /api/documents/upload
+ * Upload a new PDF document
+ * 
+ * Request: multipart/form-data with 'document' field containing PDF file
+ * Response: JSON with document ID and metadata
+ * 
+ * Security features:
+ * - Filename sanitization
+ * - Magic byte validation (real PDF check)
+ * - Size limits (10MB)
+ * - Automatic cleanup on failure
+ */
 app.post('/api/documents/upload', upload.single('document'), (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No file uploaded' });
@@ -134,9 +202,10 @@ app.post('/api/documents/upload', upload.single('document'), (req, res) => {
   const { filename, path: filepath, size } = req.file;
   const originalFilename = req.savedOriginalFilename || filename;
 
-  // Do a magic-byte check to ensure the uploaded file is actually a PDF.
+  // Perform magic-byte validation to ensure file is actually a PDF
+  // This catches files that were renamed to .pdf but aren't real PDFs
   if (!isRealPDF(filepath)) {
-    // Delete the uploaded file immediately if not a real PDF
+    // Delete the uploaded file immediately if validation fails
     try {
       fs.unlinkSync(filepath);
     } catch (e) {
@@ -145,24 +214,24 @@ app.post('/api/documents/upload', upload.single('document'), (req, res) => {
     return res.status(400).json({ error: 'Uploaded file is not a valid PDF' });
   }
 
-  // Try to insert with original_filename column. If the column doesn't exist (older DB),
-  // fall back to inserting without it.
+  // Insert document record into database
+  // Try with original_filename column first (newer schema)
   db.run(
     'INSERT INTO documents (filename, original_filename, filepath, filesize) VALUES (?, ?, ?, ?)',
     [filename, originalFilename, filepath, size],
     function (err) {
       if (err) {
-        // If column original_filename doesn't exist, fallback to older insert signature
+        // Fallback for older database schema without original_filename column
         if (err.message && err.message.includes('no such column: original_filename')) {
           db.run(
             'INSERT INTO documents (filename, filepath, filesize) VALUES (?, ?, ?)',
             [filename, filepath, size],
             function (err2) {
               if (err2) {
-                // Delete uploaded file if database insert fails
+                // Clean up uploaded file if database insert fails
                 try {
                   fs.unlinkSync(filepath);
-                } catch (e) { /* ignore */ }
+                } catch (e) { /* ignore cleanup errors */ }
                 return res.status(500).json({ error: 'Database error: ' + err2.message });
               }
 
@@ -177,13 +246,14 @@ app.post('/api/documents/upload', upload.single('document'), (req, res) => {
           return;
         }
 
-        // Generic DB error
+        // Generic database error handling
         try {
           fs.unlinkSync(filepath);
-        } catch (e) { /* ignore */ }
+        } catch (e) { /* ignore cleanup errors */ }
         return res.status(500).json({ error: 'Database error: ' + err.message });
       }
 
+      // Success response with new document metadata
       return res.status(201).json({
         id: this.lastID,
         filename,
@@ -195,7 +265,12 @@ app.post('/api/documents/upload', upload.single('document'), (req, res) => {
   );
 });
 
-// 2. Get all documents
+/**
+ * GET /api/documents
+ * Retrieve list of all documents
+ * 
+ * Response: JSON array of document objects ordered by upload date (newest first)
+ */
 app.get('/api/documents', (req, res) => {
   db.all('SELECT * FROM documents ORDER BY created_at DESC', [], (err, rows) => {
     if (err) {
@@ -205,10 +280,23 @@ app.get('/api/documents', (req, res) => {
   });
 });
 
-// 3. Download a specific document
+/**
+ * GET /api/documents/:id
+ * Download a specific document
+ * 
+ * URL Parameters:
+ * - id: Document ID from database
+ * 
+ * Response: File download with original filename
+ * 
+ * Features:
+ * - Uses original filename for download (user-friendly)
+ * - Validates file exists in both database and filesystem
+ */
 app.get('/api/documents/:id', (req, res) => {
   const { id } = req.params;
 
+  // First, look up document metadata in database
   db.get('SELECT * FROM documents WHERE id = ?', [id], (err, row) => {
     if (err) {
       return res.status(500).json({ error: 'Database error: ' + err.message });
@@ -220,13 +308,16 @@ app.get('/api/documents/:id', (req, res) => {
 
     const filePath = row.filepath;
 
+    // Verify file still exists on filesystem
     if (!fs.existsSync(filePath)) {
       return res.status(404).json({ error: 'File not found on server' });
     }
 
-    // Prefer original filename for download if available
+    // Use original filename for download (better user experience)
+    // Falls back to stored filename if original isn't available
     const downloadName = row.original_filename || row.filename;
 
+    // Send file as download with appropriate headers
     res.download(filePath, downloadName, (err) => {
       if (err) {
         console.error('Error downloading file:', err);
@@ -238,10 +329,24 @@ app.get('/api/documents/:id', (req, res) => {
   });
 });
 
-// 4. Delete a document
+/**
+ * DELETE /api/documents/:id
+ * Delete a document from both database and filesystem
+ * 
+ * URL Parameters:
+ * - id: Document ID to delete
+ * 
+ * Response: Success message
+ * 
+ * Features:
+ * - Removes file from filesystem
+ * - Removes database record
+ * - Graceful handling if file already deleted from filesystem
+ */
 app.delete('/api/documents/:id', (req, res) => {
   const { id } = req.params;
 
+  // Look up document to get filepath
   db.get('SELECT * FROM documents WHERE id = ?', [id], (err, row) => {
     if (err) {
       return res.status(500).json({ error: 'Database error: ' + err.message });
@@ -251,13 +356,14 @@ app.delete('/api/documents/:id', (req, res) => {
       return res.status(404).json({ error: 'Document not found' });
     }
 
-    // Delete file from filesystem
+    // Delete file from filesystem if it exists
     const filePath = row.filepath;
     if (fs.existsSync(filePath)) {
       try {
         fs.unlinkSync(filePath);
       } catch (err) {
         console.error('Error deleting file:', err);
+        // Continue to delete database record even if file deletion fails
       }
     }
 
@@ -272,10 +378,20 @@ app.delete('/api/documents/:id', (req, res) => {
   });
 });
 
-// Error handling middleware
+// ===========================
+// Error Handling Middleware
+// ===========================
+
+/**
+ * Global error handler for Express
+ * Catches errors from all routes and provides appropriate responses
+ * 
+ * Special handling for Multer errors (file upload errors)
+ */
 app.use((err, req, res, next) => {
   console.error(err.stack);
 
+  // Handle Multer-specific errors (file upload issues)
   if (err instanceof multer.MulterError) {
     if (err.code === 'LIMIT_FILE_SIZE') {
       return res.status(400).json({ error: 'File size exceeds 10MB limit' });
@@ -283,16 +399,30 @@ app.use((err, req, res, next) => {
     return res.status(400).json({ error: err.message });
   }
 
+  // Generic error response
   res.status(500).json({ error: err.message || 'Internal server error' });
 });
 
-// Start server
+// ===========================
+// Server Startup
+// ===========================
+
+/**
+ * Start the Express server
+ */
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
   console.log(`API available at http://localhost:${PORT}/api`);
 });
 
-// Graceful shutdown
+// ===========================
+// Graceful Shutdown
+// ===========================
+
+/**
+ * Handle SIGINT (Ctrl+C) for graceful shutdown
+ * Closes database connection before exiting
+ */
 process.on('SIGINT', () => {
   db.close((err) => {
     if (err) {
