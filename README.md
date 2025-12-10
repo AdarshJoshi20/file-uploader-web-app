@@ -156,6 +156,4 @@ Output stored in:
 client/dist
 ```
 
-## License
 
-Add a license such as MIT as needed.
