@@ -17,16 +17,12 @@ const PORT = 3001;
 const MAX_NAME_LEN = 200; // Maximum length for sanitized filenames
 const uploadsDir = path.join(__dirname, 'uploads'); // Directory for storing uploaded files
 
-// ===========================
-// Middleware Configuration
-// ===========================
+
 
 app.use(cors()); // Enable Cross-Origin Resource Sharing for frontend communication
 app.use(express.json()); // Parse JSON request bodies
 
-// ===========================
-// File System Setup
-// ===========================
+
 
 // Create uploads directory if it doesn't exist
 // This ensures the server can store files even on first run
@@ -34,9 +30,7 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-// ===========================
-// Database Initialization
-// ===========================
+
 
 // Initialize SQLite database connection
 // Creates a file-based database (database.sqlite) if it doesn't exist
@@ -82,9 +76,7 @@ function initializeDatabase() {
   );
 }
 
-// ===========================
-// Security Validation Functions
-// ===========================
+
 
 /**
  * Validates that a file is actually a PDF by checking magic bytes
@@ -108,9 +100,7 @@ function isRealPDF(filePath) {
   }
 }
 
-// ===========================
-// Multer Configuration
-// ===========================
+
 
 /**
  * Configure Multer storage engine
@@ -177,9 +167,9 @@ const upload = multer({
   },
 });
 
-// ===========================
+
 // API Routes
-// ===========================
+
 
 /**
  * POST /api/documents/upload
@@ -378,9 +368,8 @@ app.delete('/api/documents/:id', (req, res) => {
   });
 });
 
-// ===========================
+
 // Error Handling Middleware
-// ===========================
 
 /**
  * Global error handler for Express
@@ -403,9 +392,8 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: err.message || 'Internal server error' });
 });
 
-// ===========================
+
 // Server Startup
-// ===========================
 
 /**
  * Start the Express server
@@ -415,9 +403,8 @@ app.listen(PORT, () => {
   console.log(`API available at http://localhost:${PORT}/api`);
 });
 
-// ===========================
+
 // Graceful Shutdown
-// ===========================
 
 /**
  * Handle SIGINT (Ctrl+C) for graceful shutdown
